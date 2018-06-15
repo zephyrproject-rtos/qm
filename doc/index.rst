@@ -3,12 +3,14 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to Zephyr Quality Management's documentation!
-=====================================================
+Welcome to Zephyr Quality Management
+====================================
 
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
+
+   plans/index.rst
 
 
 
