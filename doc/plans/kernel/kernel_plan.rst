@@ -20,8 +20,7 @@ API verification
         * K\_\*\_INITIALIZER (example: \_K\_WORK\_INITIALIZER)
         * k\_\*\_init (example: k\_sem\_init, k\_mutex\_init)
 
-    * Verify usages mentioned in Zephyr kernel API documentation:
-      :ref:`kernel_apis`
+    * Verify usages mentioned in Zephyr kernel API documentation
 
     * Verify every API’s functionality with its typical parameters defined in
       zephyr/kernel/include.
@@ -51,7 +50,7 @@ Concept verification
 ====================
 
     * Verify testable statements mentioned in kernel documentation
-      ("Concept" section, example: :ref:`lifecycle_v2`)
+      ("Concept" section)
 
     * Usually these are behavioral description about kernel service or
       feature.

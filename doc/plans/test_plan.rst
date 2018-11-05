@@ -1,7 +1,7 @@
-.. _Test_plan:
+.. _test_plan:
 
 Zephyr Test Plan
-########################
+################
 
 This document provides a general introduction of the Zephyr Test Plan.
 Zephyr provides test suite for various functionalities offered in
@@ -9,37 +9,42 @@ the project.
 
 Kernel services and capabilities
 ================================
-    Services offered by kernel like memory management, scheduling,
-    interrupt services, timers and data passing mechanisms are verified
-    with API level testing and functionality testing.
-    :ref:`_kernel_plan`
+
+Services offered by kernel like memory management, scheduling,
+interrupt services, timers and data passing mechanisms are verified
+with API level testing and functionality testing.
 
 Networking services
 ===================
-    Various protocols including HTTP, COAP, MQTT, ARP, 6lo, TCP, UDP
-    and other protocols are verified.
+
+Various protocols including HTTP, COAP, MQTT, ARP, 6lo, TCP, UDP
+and other protocols are verified.
 
 Sensor subsystem support
 ========================
-    Zephyr sensor driver is validated to measure physical parameters
-    such as temperature, pressure, ambience, humidity,
-    light intensity, proximity and other real time sensory information.
+
+Zephyr sensor driver is validated to measure physical parameters
+such as temperature, pressure, ambience, humidity,
+light intensity, proximity and other real time sensory information.
 
 File system
 ===========
-    Newtron Flash Filesystem (NFFS) and FATFS support, FCB
-    (Flash Circular Buffer) for memory constrained applications, and
-    file system enhancements for logging and configuration are verified.
+
+Newtron Flash Filesystem (NFFS) and FATFS support, FCB
+(Flash Circular Buffer) for memory constrained applications, and
+file system enhancements for logging and configuration are verified.
 
 Device Driver support
 =====================
-    Device drivers such as GPIO, I2C, I2S, SPI, RTC, UART, AIO and
-    other driver functionalities are verified.
+
+Device drivers such as GPIO, I2C, I2S, SPI, RTC, UART, AIO and
+other driver functionalities are verified.
 
 Power management services
 =========================
-    Power management services such as tickless idle and an advanced
-    idling infrastructure are also verified.
+
+Power management services such as tickless idle and an advanced
+idling infrastructure are also verified.
 
 Test Strategy and Approach
 **************************
@@ -86,7 +91,8 @@ using doxygen.
 Debug and result analysis are done using TC_PRINT function.
 
 Detailed explanation about the testing APIs and their usage in
-test applications is given in the :ref:`testing` documentation.
+test applications is available in the Testing section of the Zephyr
+documentation.
 
 Test Methodology
 ****************
