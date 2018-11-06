@@ -1,0 +1,33 @@
+language: c
+
+compiler: gcc
+
+
+build:
+    cache: false
+    cache_dir_list:
+        - ${SHIPPABLE_BUILD_DIR}/ccache
+    pre_ci_boot:
+        image_name: zephyrprojectrtos/ci
+        image_tag: v0.4-rc12
+        pull: true
+        options: "-e HOME=/home/buildslave --privileged=true --tty --net=bridge --user buildslave"
+
+    ci:
+      - export ZEPHYR_BASE=`pwd`
+      - mkdir -p shippable/testresults
+      - mkdir -p shippable/codecoverage
+      - >
+        if [ "$IS_PULL_REQUEST" = "true" ]; then
+          git rebase origin/${PULL_REQUEST_BASE_BRANCH};
+        fi
+      - pushd doc
+      - make html
+      - popd
+      - export COMMIT_RANGE=origin/${PULL_REQUEST_BASE_BRANCH}..HEAD
+      - ./scripts/ci/check-compliance.py --commits ${COMMIT_RANGE} || true;
+      - >
+          if [ -e compliance.xml ]; then
+            cp compliance.xml shippable/testresults/;
+          fi;
+
