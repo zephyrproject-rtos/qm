@@ -22,7 +22,8 @@ build:
           git rebase origin/${PULL_REQUEST_BASE_BRANCH};
         fi
       - pushd doc
-      - make html
+      - make html 2>&1 | tee doc.log
+      - grep WARNING doc.log > ../doc.warnings || true
       - popd
       - export COMMIT_RANGE=origin/${PULL_REQUEST_BASE_BRANCH}..HEAD
       - ./scripts/ci/check-compliance.py --commits ${COMMIT_RANGE} || true;
