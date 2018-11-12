@@ -10,6 +10,7 @@ Welcome to Zephyr Quality Management
    :maxdepth: 2
    :caption: Contents:
 
+   plans/high_level_test_plan.rst
    plans/test_plan.rst
 
 
