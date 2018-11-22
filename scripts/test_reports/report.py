@@ -4,6 +4,8 @@
 import sys
 import os
 import glob
+import coloredlogs
+
 from pprint import pprint
 sys.path.append(".")
 from testrail_client import TestRailClient
@@ -12,6 +14,11 @@ from junitparser import TestCase, TestSuite, JUnitXml, Skipped, Error
 import re
 import datetime
 import argparse
+
+import plugins
+from plugins import nxp
+
+import pkgutil
 
 retest_text = "description: subtestcase didn't run: likely the image failed to build or to deploy"
 
@@ -363,7 +370,7 @@ class TCF(TestRun):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-                description="Upload results from TCF")
+                description="Upload results from TCF/plugin")
     parser.add_argument('-j', '--junit-dir', default=None,
             help="Directory with junit files")
 
@@ -373,19 +380,41 @@ def parse_args():
     parser.add_argument('-s', '--suite', type=int, help="Suite ID")
     parser.add_argument('-n', '--dry-run', action="store_true", help="Dry run")
     parser.add_argument("-m", "--milestone", type=int, help="Milestone ID")
+    parser.add_argument("-P", "--plugin", default=None ,help="plugin slector")
 
-    return parser.parse_args()
+    return parser.parse_known_args()
+
+def find_plug_by_name(tname):
+    pkgpath = os.path.dirname(plugins.__file__)
+    plgs = [name for _, name, _ in pkgutil.iter_modules([pkgpath])]
+    for plg in plgs:
+        plugin_module = getattr(plugins, plg)
+        plugin_name = getattr(plugin_module, 'get_plugin_name')
+        if plugin_name() == tname:
+            class_name = getattr(plugin_module, 'get_class_name')
+            sub_module_class = getattr(plugin_module, class_name())
+            sub_module_class_instance = sub_module_class("")
+            return sub_module_class_instance
+    return None
 
 def main():
-    args = parse_args()
+    args, unknown = parse_args()
+    coloredlogs.install()
+    if args.plugin:
+        plugin = find_plug_by_name(args.plugin)
+        if plugin == None:
+            print("plugin %s no support"%args.plugin)
+            return
+        else:
+            plugin.process(args)
+    else:
+        # Discover TCF Testuls
+        tr = TCF(result_directory=args.junit_dir, project_id=args.project, suite=args.suite, version=args.commit, milestone=args.milestone)
 
-    # Discover TCF Testuls
-    tr = TCF(result_directory=args.junit_dir, project_id=args.project, suite=args.suite, version=args.commit, milestone=args.milestone)
-
-    tr.discover()
-    tr.configure()
-    tr.process()
-    tr.upload()
+        tr.discover()
+        tr.configure()
+        tr.process()
+        tr.upload()
 
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
+import logging
 from testrail_client.api.base import TestRailAPIBase
 
 
@@ -81,7 +81,7 @@ class Result(TestRailAPIBase):
         :param assignedto_id:The ID of a user the test should be assigned to
         """
         param = dict(status_id=status_id, comment=comment,
-                     vesion=reversed, elapsed=elapsed, defects=defects,
+                     vesion=vesion, elapsed=elapsed, defects=defects,
                      assignedto_id=assignedto_id)
         param.update(**kwargs)
         return self._post('add_result_for_case/{run_id}/{case_id}'
