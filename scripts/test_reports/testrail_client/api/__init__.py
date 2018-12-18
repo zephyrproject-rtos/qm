@@ -9,6 +9,7 @@ from testrail_client.api.project import Project
 from testrail_client.api.result import Result
 from testrail_client.api.run import Run
 from testrail_client.api.section import Section
+from testrail_client.api.statuses import Statuses
 from testrail_client.api.suite import Suite
 from testrail_client.api.test import Test
 from testrail_client.api.user import User
@@ -60,6 +61,10 @@ class TestRailAPI(object):
     @property
     def section(self):
         return Section(self.url, self.user_name, self.password)
+
+    @property
+    def statuses(self):
+        return Statuses(self.url, self.user_name, self.password)
 
     @property
     def suite(self):
