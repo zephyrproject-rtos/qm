@@ -15,7 +15,7 @@ import argparse
 
 retest_text = "description: subtestcase didn't run: likely the image failed to build or to deploy"
 
-DEBUG = True
+DEBUG = False
 
 def debug(msg):
     if DEBUG:
@@ -28,8 +28,8 @@ class TestRail():
 
     def authorize(self):
         self.project = 'https://zephyrproject.testrail.io'
-        self.user = '<email>'
-        self.token = '<token>'
+        self.user = os.environ.get('TESTRAIL_USER', None)        
+        self.token = os.environ.get('TESTRAIL_TOKEN', None)
 
         self.client = TestRailClient(self.project, self.user, self.token)
 
@@ -133,16 +133,14 @@ class TestRun(TestRail):
         self.plan_entries = None
 
     def configure(self):
-
-        today = datetime.date.today().strftime("%B %d, %Y")
-
-        self.cases = self.client.case.for_project(project_id=self.project_id, suite_id=self.suite)
-
         self.status = Status(self.project_id)
-
-        self.plan = self.client.plan.add(self.project_id,
-                                         "Zephyr Core OS Daily: {} {}".format(self.version, today),
-                                         milestone_id=self.milestone)
+        self.cases = self.client.case.for_project(project_id=self.project_id, suite_id=self.suite)
+        
+        if not self.plan:
+            today = datetime.date.today().strftime("%B %d, %Y")
+            self.plan = self.client.plan.add(self.project_id,
+                                             "Zephyr Core OS Daily: {} {}".format(self.version, today),
+                                             milestone_id=self.milestone)
 
     def get_case_id(self, reference):
         for case in self.cases:
@@ -248,8 +246,10 @@ class TestRun(TestRail):
             tids =[]
 
             for result in results_to_upload:
+                print(result)
                 ref = result['ref']
                 case_id = self.get_case_id(ref)
+                print(case_id)
                 if case_id:
                     tids.append(case_id)
 
@@ -277,14 +277,12 @@ class TestRun(TestRail):
 
         runs = []
         for entry in plan['entries']:
-
             runs = entry['runs']
 
         for rr in self.final_results:
             for r in runs:
                 if r['config'] == rr['config']:
                     print("Submitting results for {}".format(rr['config']))
-                    #pprint(rr['results'])
                     self.client.result.add_for_cases(r['id'], rr['results'] )
 
 class TCF(TestRun):
@@ -361,26 +359,98 @@ class TCF(TestRun):
         for rf in self.result_files:
             rf['id'] = p.provides(rf['platform'])
 
+
+class SanityCheck(TestRun):
+
+    def __init__(self, results_file, config, project_id, version, suite, milestone, plan):
+        super().__init__()
+        super().authorize()
+
+        if plan:
+            self.plan = self.client.plan.get(plan)
+
+            pprint(self.plan)
+            self.project_id = self.plan.get('project_id', None)
+        else:
+            self.project_id = project_id
+
+
+        self.config = config
+        self.version = version
+        self.suite = suite
+        self.results_file = results_file
+        self.milestone = milestone
+
+    def get_case_name(self, name):
+        return name
+
+    def find_parent_in_junit(self, junit_xml, name):
+        return None
+
+    def get_case_text(self, text):
+        return text
+
+    def discover(self):
+
+        self.result_files.append({"file": self.results_file, "platform": self.config})
+
+        # Get platforms from project
+        p = Platforms(project_id=self.project_id)
+        p.get()
+
+
+        if p.provides(platform_name=self.config) == 0:
+            print("Need to create new platform %s" % self.config)
+            p.add(self.config)
+
+        # update
+        p.get()
+        for rf in self.result_files:
+            rf['id'] = p.provides(self.config)
+
 def parse_args():
     parser = argparse.ArgumentParser(
-                description="Upload results from TCF")
+                description="Upload test results testrail")
+
     parser.add_argument('-j', '--junit-dir', default=None,
             help="Directory with junit files")
 
-    parser.add_argument('-V', '--commit', default=None, help="Version being tested (git desribe string)")
+    parser.add_argument('-f', '--junit-file', default=None,
+            help="File with test results in junit format.")
+
+    parser.add_argument('-c', '--config', default=None,
+            help="Configuration name.")
+
+    parser.add_argument('-V', '--commit', default=None,
+        help="Version being tested (git desribe string)")
 
     parser.add_argument('-p', '--project', type=int, help="Project ID")
     parser.add_argument('-s', '--suite', type=int, help="Suite ID")
     parser.add_argument('-n', '--dry-run', action="store_true", help="Dry run")
     parser.add_argument("-m", "--milestone", type=int, help="Milestone ID")
 
+    parser.add_argument('-P', '--plan', type=int, help="Test plan ID")
+
     return parser.parse_args()
 
 def main():
     args = parse_args()
 
-    # Discover TCF Testuls
-    tr = TCF(result_directory=args.junit_dir, project_id=args.project, suite=args.suite, version=args.commit, milestone=args.milestone)
+
+
+
+
+    # Discover Restuls
+    tr = SanityCheck(results_file=args.junit_file,
+                     config=args.config,
+                     project_id=args.project,
+                     suite=args.suite,
+                     version=args.commit,
+                     milestone=args.milestone,
+                     plan=args.plan)
+
+
+
 
     tr.discover()
     tr.configure()
