@@ -34,46 +34,46 @@ class TestRail():
         self.client = TestRailClient(self.project, self.user, self.token)
 
 
-class Platform():
+class Config():
     def __init__(self, name, group, id):
         self.name = name
         self.group_id = group
         self.id = id
 
 
-class Platforms(TestRail):
+class Configurations(TestRail):
 
     def __init__(self, project_id):
         super().authorize()
 
         self.project = project_id
         self.group_id = None
-        self.platforms = []
+        self.configs = []
 
-    def get(self):
+    def get(self, group):
         configs = self.client.config.get(self.project)
 
-        # search for 'Platforms'
-        idx = next((index for (index, d) in enumerate(configs) if d["name"] == "Platforms"), None)
-        if idx >= 0:
+        # search for group
+        idx = next((index for (index, d) in enumerate(configs) if d["name"] == group), None)
+        if configs and idx >= 0:
             self.group_id = configs[idx]['id']
             debug(self.group_id)
             for c in configs[idx]['configs']:
-                p = Platform(c['name'], c['group_id'], c['id'])
-                self.platforms.append(p)
+                p = Config(c['name'], c['group_id'], c['id'])
+                self.configs.append(p)
         else:
             print("Creating new group")
-            self.client.config.add_group(project_id=self.project, name="Platforms")
+            self.client.config.add_group(project_id=self.project, name=group)
             configs = self.client.config.get(self.project)
-            self.group_id = next((index for (index, d) in enumerate(configs) if d["name"] == "Platforms"), None)
+            pprint(configs)
+            self.group_id = next((index for (index, d) in enumerate(configs) if d["name"] == group), None)
 
+    def add(self, config):
+        self.client.config.add(self.group_id, config)
 
-    def add(self, platform_name):
-        self.client.config.add(self.group_id, platform_name)
-
-    def provides(self, platform_name):
-        for p in self.platforms:
-            if p.name == platform_name:
+    def provides(self, config):
+        for p in self.configs:
+            if p.name == config:
                 return p.id
 
         return 0
@@ -90,6 +90,7 @@ class Status(TestRail):
         self.BLOCKED = None
         self.SKIPPED = None
         self.RETEST = None
+        self.UNTESTED = None
 
         self.populate()
 
@@ -108,6 +109,8 @@ class Status(TestRail):
                 self.BLOCKED = sid
             elif sname == "skipped":
                 self.SKIPPED = sid
+            elif sname == "untested":
+                self.UNTESTED = sid
             elif sname == "retest":
                 self.RETEST = sid
 
@@ -135,7 +138,7 @@ class TestRun(TestRail):
     def configure(self):
         self.status = Status(self.project_id)
         self.cases = self.client.case.for_project(project_id=self.project_id, suite_id=self.suite)
-        
+
         if not self.plan:
             today = datetime.date.today().strftime("%B %d, %Y")
             self.plan = self.client.plan.add(self.project_id,
@@ -155,114 +158,125 @@ class TestRun(TestRail):
     def get_case_text(self, text):
         return text
 
-    def process(self):
+
+    def parse_files(self):
 
         for result_file in self.result_files:
-            config = result_file['platform']
-            print("Parsing {}".format(result_file['file']))
-            junit_xml = JUnitXml.fromfile(result_file['file'])
+            self.parse_file(result_file)
 
-            results_to_upload = []
-            parents = {}
+    def parse_file(self, result_file):
 
-            for suite in junit_xml:
-                for testcase in suite:
-                    if testcase.result and testcase.result.type == 'skipped':
-                        continue
+        config = result_file.get('config')
 
-                    ref = self.get_case_name(testcase.name)
+        print("Parsing {}".format(result_file['file']))
 
 
-                    # if test is skipped, keep it as such, otherwise look at parent results
-                    if  testcase.result:
-                        tc = testcase
-                    elif testcase.name in parents:
-                        tc = parents[testcase.name]
-                    else:
-                        parent = self.find_parent_in_junit(junit_xml, testcase.name)
-                        if parent:
-                            debug("--> found parent failure: %s -> %s" %(parent.name, parent.result) )
+        junit_xml = JUnitXml.fromfile(result_file['file'])
 
-                            runid_err = "eval error: expected console output 'RunID"
-                            runid_result = "console output: RunID"
+        results_to_upload = []
+        parents = {}
 
-                            if parent.result._elem.text and runid_err in parent.result._elem.text and runid_result in parent.result._elem.text:
+        for suite in junit_xml:
+            for testcase in suite:
+                if testcase.result and testcase.result.type == 'skipped':
+                    continue
 
-                                debug("{} parent is FALSE NEGATIVE, so keep sub-test result".format(testcase.name))
-                                tc = testcase
-                            else:
-                                tc = parent
+                ref = self.get_case_name(testcase.name)
+                # if test is skipped, keep it as such, otherwise look at parent results
+                if  testcase.result:
+                    tc = testcase
+                elif testcase.name in parents:
+                    tc = parents[testcase.name]
+                else:
+                    parent = self.find_parent_in_junit(junit_xml, testcase.name)
+                    if parent:
+                        debug("--> found parent failure: %s -> %s" %(parent.name, parent.result) )
 
-                            parents[testcase.name] = parent
-                        else:
+                        runid_err = "eval error: expected console output 'RunID"
+                        runid_result = "console output: RunID"
+
+                        if parent.result._elem.text and runid_err in parent.result._elem.text and runid_result in parent.result._elem.text:
+
+                            debug("{} parent is FALSE NEGATIVE, so keep sub-test result".format(testcase.name))
                             tc = testcase
-
-
-                    cr = {}
-
-                    cr['ref'] = ref
-
-                    filtered = ""
-                    infra_issue = False
-                    if tc.result:
-                        override = None
-
-                        text = tc.result._elem.text
-                        if text:
-                            filtered = self.get_case_text(text)
-
-                        if override:
-                            test_status = override
                         else:
-                            if tc.result.type == 'error' and tc.result.message == 'Infrastructure':
-                                test_status = self.status.RETEST
-                                infra_issue = True
-                            elif tc.result.type == 'error':
-                                test_status = self.status.BLOCKED
-                            elif tc.result.type == 'skipped':
-                                test_status = self.status.SKIPPED
-                            elif tc.result.type == 'failure':
-                                test_status = self.status.FAILED
-                            else:
-                                test_status = self.status.RETEST
+                            tc = parent
 
-                            status_text = tc.result.type
-
-                        cr['status_id'] = test_status
+                        parents[testcase.name] = parent
                     else:
-                        cr['status_id'] = self.status.PASSED
-                        status_text = 'passed'
+                        tc = testcase
 
-                    debug("{}: {} => {}".format(config, testcase.name, status_text))
-                    if filtered == "" and infra_issue:
-                        cr['comment'] = "Infrastructure issue, please retest."
+                cr = {}
+                cr['ref'] = ref
+
+                filtered = ""
+                infra_issue = False
+                if tc.result:
+                    override = None
+
+                    text = tc.result._elem.text
+                    if text:
+                        filtered = self.get_case_text(text)
+
+                    if override:
+                        test_status = override
                     else:
-                        cr['comment'] = filtered
+                        if tc.result.type == 'error' and tc.result.message == 'Infrastructure':
+                            test_status = self.status.RETEST
+                            infra_issue = True
+                        elif tc.result.type == 'error':
+                            test_status = self.status.BLOCKED
+                        elif tc.result.type == 'skipped':
+                            test_status = self.status.SKIPPED
+                        elif tc.result.type == 'failure':
+                            test_status = self.status.FAILED
+                        else:
+                            test_status = self.status.RETEST
 
-                    cr['version'] = self.version
-                    results_to_upload.append(cr)
+                        status_text = tc.result.type
 
-            tmp_res = []
-            tids =[]
+                    cr['status_id'] = test_status
+                else:
+                    cr['status_id'] = self.status.PASSED
+                    status_text = 'passed'
 
-            for result in results_to_upload:
-                print(result)
-                ref = result['ref']
-                case_id = self.get_case_id(ref)
-                print(case_id)
-                if case_id:
-                    tids.append(case_id)
+                debug("{}: {} => {}".format(config, testcase.name, status_text))
+                if filtered == "" and infra_issue:
+                    cr['comment'] = "Infrastructure issue, please retest."
+                else:
+                    cr['comment'] = filtered
 
-                    result['case_id'] = case_id
-                    del result['ref']
-                    tmp_res.append(result)
+                cr['version'] = self.version
+                results_to_upload.append(cr)
 
-            entry = {
-                "include_all": False,
-                "case_ids": tids,
-                "config_ids": [result_file['id']],
-            }
-            self.final_results.append({'config': config, 'results': tmp_res, 'run_entry': entry, 'config_id': result_file['id']})
+
+        pprint(results_to_upload)
+
+        tmp_res = []
+        tids =[]
+
+        for result in results_to_upload:
+            print(result)
+            ref = result['ref']
+            case_id = self.get_case_id(ref)
+            print(case_id)
+            if case_id:
+                tids.append(case_id)
+
+                result['case_id'] = case_id
+                del result['ref']
+                tmp_res.append(result)
+
+        entry = {
+            "include_all": False,
+            "case_ids": tids,
+            "config_ids": [result_file['id']],
+        }
+        self.final_results.append({'config': config, 'results': tmp_res, 'run_entry': entry, 'config_id': result_file['id']})
+
+
+    def process(self):
+        self.parse_files()
 
         for fr in self.final_results:
             print("Creating plan configuration")
@@ -281,9 +295,9 @@ class TestRun(TestRail):
 
         for rr in self.final_results:
             for r in runs:
-                if r['config'] == rr['config']:
-                    print("Submitting results for {}".format(rr['config']))
-                    self.client.result.add_for_cases(r['id'], rr['results'] )
+                if r['config'] == rr.get('config'):
+                    print("Submitting results for {}".format(rr.get('config')))
+                    self.client.result.add_for_cases(r['id'], rr.get('results') )
 
 class TCF(TestRun):
 
@@ -341,23 +355,23 @@ class TCF(TestRun):
                 platform = file_meta[0].replace("junit-", "")
 
                 if platform != 'static':
-                    self.result_files.append({"file": j, "platform": platform})
+                    self.result_files.append({"file": j, "config": platform})
 
         # Get platforms from project
-        p = Platforms(project_id=self.project_id)
-        p.get()
+        p = Configurations(project_id=self.project_id)
+        p.get("Platforms")
 
-        # See if we need to create new configurations for platforms on project
+        # See if we need to create new configurations on project
         for rf in self.result_files:
-            platform = rf['platform']
-            if p.provides(platform_name=platform) == 0:
-                print("Need to create new platform %s" % rf['platform'])
-                p.add(platform)
+            config = rf['config']
+            if p.provides(config=config) == 0:
+                print("Need to create new config %s" % rf.get('config'))
+                p.add(config)
 
         # update
-        p.get()
+        p.get("Platforms")
         for rf in self.result_files:
-            rf['id'] = p.provides(rf['platform'])
+            rf['id'] = p.provides(rf.get('config'))
 
 
 class SanityCheck(TestRun):
@@ -390,33 +404,175 @@ class SanityCheck(TestRun):
     def get_case_text(self, text):
         return text
 
+
+
     def discover(self):
 
-        self.result_files.append({"file": self.results_file, "platform": self.config})
+        self.result_files.append({"file": self.results_file, "config": self.config})
 
         # Get platforms from project
-        p = Platforms(project_id=self.project_id)
-        p.get()
+        p = Configurations(project_id=self.project_id)
+        p.get("Platforms")
 
-
-        if p.provides(platform_name=self.config) == 0:
-            print("Need to create new platform %s" % self.config)
-            p.add(self.config)
+        # See if we need to create new configurations for platforms on project
+        for rf in self.result_files:
+            config = rf['config']
+            if p.provides(config=config) == 0:
+                print("Need to create new config %s" % rf.get('config'))
+                p.add(config)
 
         # update
-        p.get()
+        p.get("Platforms")
         for rf in self.result_files:
-            rf['id'] = p.provides(self.config)
+            rf['id'] = p.provides(rf.get('config'))
+
+
+
+class MaxwellPro(TestRun):
+
+    def __init__(self, results_file, config, project_id, version, suite, milestone, plan):
+        super().__init__()
+        super().authorize()
+
+        if plan:
+            self.plan = self.client.plan.get(plan)
+            self.project_id = self.plan.get('project_id', None)
+        else:
+            self.project_id = project_id
+
+        self.config = config
+        self.version = version
+        self.suite = suite
+        self.results_file = results_file
+        self.milestone = milestone
+
+    def get_case_name(self, name):
+        return name
+
+    def find_parent_in_junit(self, junit_xml, name):
+        return None
+
+    def get_case_text(self, text):
+        return text
+
+    def results_for_config(self, results_file, config):
+
+        results = []
+        with open(self.results_file, "r") as file:
+            for line in file.readlines():
+                #match = re.match(r"\s*(\d+)/(\d+)\s+([^\s]+)\s+(%s)\s+(PASS|SKIPPED|FAIL|UNGRADED)".format(config), line)
+                match = re.match(r"\s*(\d+)/(\d+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)", line)
+                if match and match.group(4) == config:
+                    results.append({'id': match.group(3), 'result': match.group(5)})
+        return results
+
+    def parse_file(self, result_file):
+
+        config = result_file.get('config')
+        print("Parsing {}".format(result_file['file']))
+
+        results = self.results_for_config(result_file.get('file'), config)
+        results_to_upload = []
+
+        for r in results:
+            cr = {}
+            cr['ref'] = r['id'].replace(".", "-").upper()
+
+            result = r.get('result')
+
+            if result == 'PASS':
+                test_status = self.status.PASSED
+            elif result == 'SKIPPED':
+                test_status = self.status.SKIPPED
+            elif result == 'FAIL':
+                test_status = self.status.FAILED
+            elif result == 'FAIL':
+                test_status = self.status.FAILED
+            elif result == 'UNGRADED':
+                test_status = self.status.UNTESTED
+                # ignore untested, no need to set this status.
+                continue
+            else:
+                test_status = self.status.RETEST
+
+            cr['status_id'] = test_status
+
+            cr['version'] = self.version
+            results_to_upload.append(cr)
+
+        #pprint(results_to_upload)
+        tmp_res = []
+        tids = []
+
+        for result in results_to_upload:
+
+            ref = result.get('ref')
+            case_id = self.get_case_id(ref)
+            if case_id:
+                tids.append(case_id)
+
+                result['case_id'] = case_id
+                del result['ref']
+                tmp_res.append(result)
+            else:
+                print("Cant find case for {}".format(ref))
+
+        entry = {
+            "include_all": False,
+            "case_ids": tids,
+            "config_ids": [result_file['id']],
+        }
+        self.final_results.append(
+            {'config': config, 'results': tmp_res, 'run_entry': entry, 'config_id': result_file['id']})
+
+
+
+
+    def discover(self):
+
+        results = {}
+        with open(self.results_file, "r") as file:
+            for line in file.readlines():
+                match = re.match(r"\s*(\d+)/(\d+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)", line)
+                if match:
+                    config = match.group(4)
+                    if results.get(config, None):
+                        config_results = results.get(config)
+                        config_results.append({'id': match.group(2), 'result': match.group(5)})
+                        results[config] = config_results
+                    else:
+                        results[config] = [{'id': match.group(3), 'result': match.group(5)}]
+
+
+        for config in results.keys():
+            self.result_files.append({"file": self.results_file, "config": config})
+
+        # Get platforms from project
+        p = Configurations(project_id=self.project_id)
+        p.get("Protocols")
+
+        # See if we need to create new configurations on project
+        for rf in self.result_files:
+            config = rf['config']
+            if p.provides(config=config) == 0:
+                print("Need to create new config %s" % config)
+                p.add(config)
+
+        # update
+        p.get("Protocols")
+        for rf in self.result_files:
+            rf['id'] = p.provides(rf.get('config'))
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
                 description="Upload test results testrail")
 
-    parser.add_argument('-j', '--junit-dir', default=None,
-            help="Directory with junit files")
+    parser.add_argument('-j', '--results-dir', default=None,
+            help="Directory with test result files")
 
-    parser.add_argument('-f', '--junit-file', default=None,
-            help="File with test results in junit format.")
+    parser.add_argument('-f', '--results-file', default=None,
+            help="File with test results format.")
 
     parser.add_argument('-c', '--config', default=None,
             help="Configuration name.")
@@ -441,7 +597,7 @@ def main():
 
 
     # Discover Restuls
-    tr = SanityCheck(results_file=args.junit_file,
+    tr = MaxwellPro(results_file=args.results_file,
                      config=args.config,
                      project_id=args.project,
                      suite=args.suite,
@@ -449,10 +605,8 @@ def main():
                      milestone=args.milestone,
                      plan=args.plan)
 
-
-
-
     tr.discover()
+
     tr.configure()
     tr.process()
     tr.upload()
