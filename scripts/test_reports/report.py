@@ -91,6 +91,7 @@ class Status(TestRail):
         self.SKIPPED = None
         self.RETEST = None
         self.UNTESTED = None
+        self.UNGRADED = None
 
         self.populate()
 
@@ -111,6 +112,8 @@ class Status(TestRail):
                 self.SKIPPED = sid
             elif sname == "untested":
                 self.UNTESTED = sid
+            elif sname == "ungraded":
+                self.UNGRADED = sid
             elif sname == "retest":
                 self.RETEST = sid
 
@@ -489,18 +492,16 @@ class MaxwellPro(TestRun):
             elif result == 'FAIL':
                 test_status = self.status.FAILED
             elif result == 'UNGRADED':
-                test_status = self.status.UNTESTED
-                # ignore untested, no need to set this status.
-                continue
+                test_status = self.status.UNGRADED
+
             else:
                 test_status = self.status.RETEST
 
             cr['status_id'] = test_status
-
             cr['version'] = self.version
+
             results_to_upload.append(cr)
 
-        #pprint(results_to_upload)
         tmp_res = []
         tids = []
 
@@ -568,10 +569,28 @@ def parse_args():
     parser = argparse.ArgumentParser(
                 description="Upload test results testrail")
 
-    parser.add_argument('-j', '--results-dir', default=None,
+
+    parser.add_argument("--runner", default='sanitycheck', choices=['tcf', 'sanitycheck', 'maxwel'],
+                        help="""
+Select runner to import from.
+""")
+
+    result_file_select = parser.add_argument_group("Result files (input)",
+                                        """
+
+You can either select a directory with multiple files or just point to
+one file depending on the source of the results.
+
+TCF results expect a directory with multiple files,
+where sanitycheck expect 1 file per configuration.
+                                        """)
+
+
+    xor_results = result_file_select.add_mutually_exclusive_group()
+    xor_results.add_argument('-j', '--results-dir', default=None,
             help="Directory with test result files")
 
-    parser.add_argument('-f', '--results-file', default=None,
+    xor_results.add_argument('-f', '--results-file', default=None,
             help="File with test results format.")
 
     parser.add_argument('-c', '--config', default=None,
@@ -582,9 +601,9 @@ def parse_args():
 
     parser.add_argument('-p', '--project', type=int, help="Project ID")
     parser.add_argument('-s', '--suite', type=int, help="Suite ID")
+
     parser.add_argument('-n', '--dry-run', action="store_true", help="Dry run")
     parser.add_argument("-m", "--milestone", type=int, help="Milestone ID")
-
     parser.add_argument('-P', '--plan', type=int, help="Test plan ID")
 
     return parser.parse_args()
@@ -593,20 +612,33 @@ def main():
     args = parse_args()
 
 
+    if args.runner == 'maxwell':
+        tr = MaxwellPro(results_file=args.results_file,
+                         config=args.config,
+                         project_id=args.project,
+                         suite=args.suite,
+                         version=args.commit,
+                         milestone=args.milestone,
+                         plan=args.plan)
+    elif args.runner == 'sanitycheck':
+        tr = SanityCheck(results_file=args.results_file,
+                         config=args.config,
+                         project_id=args.project,
+                         suite=args.suite,
+                         version=args.commit,
+                         milestone=args.milestone,
+                         plan=args.plan)
+    elif args.runner == 'tcf':
+        tr = TCF(results_dir=args.results_dir,
+                         config=args.config,
+                         project_id=args.project,
+                         suite=args.suite,
+                         version=args.commit,
+                         milestone=args.milestone,
+                         plan=args.plan)
 
-
-
-    # Discover Restuls
-    tr = MaxwellPro(results_file=args.results_file,
-                     config=args.config,
-                     project_id=args.project,
-                     suite=args.suite,
-                     version=args.commit,
-                     milestone=args.milestone,
-                     plan=args.plan)
 
     tr.discover()
-
     tr.configure()
     tr.process()
     tr.upload()
