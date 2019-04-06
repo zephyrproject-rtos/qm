@@ -1,5 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+#
+# Copyright (c) 2019 Intel Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Script to upload results to testrail.
 
 import sys
 import os
@@ -45,7 +51,6 @@ class Configurations(TestRail):
 
     def __init__(self, project_id):
         super().authorize()
-
         self.project = project_id
         self.group_id = None
         self.configs = []
@@ -55,7 +60,7 @@ class Configurations(TestRail):
 
         # search for group
         idx = next((index for (index, d) in enumerate(configs) if d["name"] == group), None)
-        if configs and idx >= 0:
+        if configs and idx is not None and idx >= 0:
             self.group_id = configs[idx]['id']
             debug(self.group_id)
             for c in configs[idx]['configs']:
@@ -63,10 +68,8 @@ class Configurations(TestRail):
                 self.configs.append(p)
         else:
             print("Creating new group")
-            self.client.config.add_group(project_id=self.project, name=group)
-            configs = self.client.config.get(self.project)
-            pprint(configs)
-            self.group_id = next((index for (index, d) in enumerate(configs) if d["name"] == group), None)
+            ret = self.client.config.add_group(project_id=self.project, name=group)
+            self.group_id = ret.get("id")
 
     def add(self, config):
         self.client.config.add(self.group_id, config)
@@ -92,6 +95,8 @@ class Status(TestRail):
         self.RETEST = None
         self.UNTESTED = None
         self.UNGRADED = None
+        self.TIMEOUT = None
+        self.ERROR = None
 
         self.populate()
 
@@ -114,6 +119,10 @@ class Status(TestRail):
                 self.UNTESTED = sid
             elif sname == "ungraded":
                 self.UNGRADED = sid
+            elif sname == "timeout":
+                self.TIMEOUT = sid
+            elif sname == "error":
+                self.ERROR = sid
             elif sname == "retest":
                 self.RETEST = sid
 
@@ -137,6 +146,7 @@ class TestRun(TestRail):
         self.cases = []
         self.final_results = []
         self.plan_entries = None
+        self.title = "Test Run"
 
     def configure(self):
         self.status = Status(self.project_id)
@@ -145,7 +155,7 @@ class TestRun(TestRail):
         if not self.plan:
             today = datetime.date.today().strftime("%B %d, %Y")
             self.plan = self.client.plan.add(self.project_id,
-                                             "Zephyr Core OS Daily: {} {}".format(self.version, today),
+                                             "{}: {} {}".format(self.title, self.version, today),
                                              milestone_id=self.milestone)
 
     def get_case_id(self, reference):
@@ -286,7 +296,7 @@ class TestRun(TestRail):
             self.config_ids.append(fr['config_id'])
             self.runs.append(fr['run_entry'])
 
-        self.plan_entries = self.client.plan.add_entry(self.plan['id'], self.suite, 'Test Run {}'.format(self.version) ,
+        self.plan_entries = self.client.plan.add_entry(self.plan['id'], self.suite, '{} Test Run {}'.format(self.title, self.version) ,
                                                          config_ids=self.config_ids, runs=self.runs)
 
     def upload(self):
@@ -316,6 +326,7 @@ class TCF(TestRun):
         self.variants = ['zephyr', 'espressif']
 
         self.results_directory = result_directory
+        self.title = "TCF"
 
     def get_case_name(self, name):
         return name.split("#")[1]
@@ -397,6 +408,7 @@ class SanityCheck(TestRun):
         self.suite = suite
         self.results_file = results_file
         self.milestone = milestone
+        self.title = "Sanitycheck"
 
     def get_case_name(self, name):
         return name
@@ -448,12 +460,10 @@ class MaxwellPro(TestRun):
         self.suite = suite
         self.results_file = results_file
         self.milestone = milestone
+        self.title = "Maxwell TCP/IP"
 
     def get_case_name(self, name):
         return name
-
-    def find_parent_in_junit(self, junit_xml, name):
-        return None
 
     def get_case_text(self, text):
         return text
@@ -526,9 +536,6 @@ class MaxwellPro(TestRun):
         self.final_results.append(
             {'config': config, 'results': tmp_res, 'run_entry': entry, 'config_id': result_file['id']})
 
-
-
-
     def discover(self):
 
         results = {}
@@ -565,12 +572,127 @@ class MaxwellPro(TestRun):
             rf['id'] = p.provides(rf.get('config'))
 
 
+class AutoPTS(TestRun):
+
+    def __init__(self, results_file, config, project_id, version, suite, milestone, plan):
+        super().__init__()
+        super().authorize()
+
+        if plan:
+            self.plan = self.client.plan.get(plan)
+            self.project_id = self.plan.get('project_id', None)
+        else:
+            self.project_id = project_id
+
+        self.config = config
+        self.version = version
+        self.suite = suite
+        self.results_file = results_file
+        self.milestone = milestone
+        self.title = "Bluetooth AutoPTS"
+
+    def get_case_name(self, name):
+        return name
+
+    def get_case_text(self, text):
+        return text
+
+    def results_for_config(self, results_file, config):
+
+        results = []
+        with open(self.results_file, "r") as file:
+            for line in file.readlines():
+                match = re.match(r"(.*)\t([^\s]+)\t(.*)", line)
+                if match:
+                    results.append({'id': match.group(2), 'result': match.group(3).strip()})
+        return results
+
+    def parse_file(self, result_file):
+
+        config = result_file.get('config')
+        print("Parsing {}".format(result_file['file']))
+
+        results = self.results_for_config(result_file.get('file'), config)
+        results_to_upload = []
+
+        for r in results:
+            cr = {}
+            cr['ref'] = r['id']
+
+            result = r.get('result')
+
+            if result == 'PASS':
+                test_status = self.status.PASSED
+            elif result == 'SKIPPED':
+                test_status = self.status.SKIPPED
+            elif result == 'FAIL':
+                test_status = self.status.FAILED
+            elif result == 'INCONC':
+                test_status = self.status.UNGRADED
+            elif result == 'BTP ERROR':
+                test_status = self.status.ERROR
+            elif result in ['BTP TIMEOUT', 'PTS TIMEOUT']:
+                test_status = self.status.TIMEOUT
+            else:
+                test_status = self.status.RETEST
+
+            cr['status_id'] = test_status
+            cr['version'] = self.version
+
+            results_to_upload.append(cr)
+
+        tmp_res = []
+        tids = []
+
+        for result in results_to_upload:
+
+            ref = result.get('ref')
+            case_id = self.get_case_id(ref)
+            if case_id:
+                tids.append(case_id)
+
+                result['case_id'] = case_id
+                del result['ref']
+                tmp_res.append(result)
+            else:
+                print("Cant find case for {}".format(ref))
+
+        entry = {
+            "include_all": False,
+            "case_ids": tids,
+            "config_ids": [result_file['id']],
+        }
+        self.final_results.append(
+            {'config': config, 'results': tmp_res, 'run_entry': entry, 'config_id': result_file['id']})
+
+    def discover(self):
+
+        results = {}
+        self.result_files.append({"file": self.results_file, "config": self.config})
+
+        # Get platforms from project
+        p = Configurations(project_id=self.project_id)
+        p.get("Platforms")
+
+        # See if we need to create new configurations on project
+        for rf in self.result_files:
+            config = rf['config']
+            if p.provides(config=config) == 0:
+                print("Need to create new config %s" % config)
+                p.add(config)
+
+        # update
+        p.get("Platforms")
+        for rf in self.result_files:
+            rf['id'] = p.provides(rf.get('config'))
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
                 description="Upload test results testrail")
 
 
-    parser.add_argument("--runner", default='sanitycheck', choices=['tcf', 'sanitycheck', 'maxwel'],
+    parser.add_argument("--runner", default='sanitycheck', choices=['tcf', 'sanitycheck', 'maxwell', 'autopts'],
                         help="""
 Select runner to import from.
 """)
@@ -636,7 +758,16 @@ def main():
                          version=args.commit,
                          milestone=args.milestone,
                          plan=args.plan)
-
+    elif args.runner == 'autopts':
+        tr = AutoPTS(results_file=args.results_file,
+                         config=args.config,
+                         project_id=args.project,
+                         suite=args.suite,
+                         version=args.commit,
+                         milestone=args.milestone,
+                         plan=args.plan)
+    else:
+        sys.exit("Unknown runner")
 
     tr.discover()
     tr.configure()
