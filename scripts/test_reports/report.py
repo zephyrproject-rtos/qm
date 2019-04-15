@@ -34,7 +34,7 @@ class TestRail():
 
     def authorize(self):
         self.project = 'https://zephyrproject.testrail.io'
-        self.user = os.environ.get('TESTRAIL_USER', None)        
+        self.user = os.environ.get('TESTRAIL_USER', None)
         self.token = os.environ.get('TESTRAIL_TOKEN', None)
 
         self.client = TestRailClient(self.project, self.user, self.token)
