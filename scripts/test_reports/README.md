@@ -10,12 +10,54 @@ Install all requirements using:
 $ pip3 install --user -r requirements.txt
 ```
 
-Make sure you set your email and token in the relevant scripts.
-
 We suggest to create a python virtual environment for this.
 
-To upload all junit results from a directory, use the following command:
+Export the following variables in the shell where you intend to run the script:
+
+- TESTRAIL\_USER
+- TESTRAIL\_TOKEN
+
+The script supports the following arguments:
 
 ```
-$ report.py -j <junit> -V v1.13.0-1386-g183e7445c6.2379   -p 5 -s 23 -m 8
+optional arguments:
+  -h, --help            show this help message and exit
+  --runner {tcf,sanitycheck,maxwell,autopts}
+                        Select runner to import from.
+  -c CONFIG, --config CONFIG
+                        Configuration name.
+  -V COMMIT, --commit COMMIT
+                        Version being tested (git desribe string)
+  -p PROJECT, --project PROJECT
+                        Project ID
+  -s SUITE, --suite SUITE
+                        Suite ID
+  -n, --dry-run         Dry run
+  -m MILESTONE, --milestone MILESTONE
+                        Milestone ID
+  -P PLAN, --plan PLAN  Test plan ID
+
+Result files (input):
+  You can either select a directory with multiple files or just point to one
+  file depending on the source of the results. TCF results expect a
+  directory with multiple files, where sanitycheck expect 1 file per
+  configuration.
+
+  -j RESULTS_DIR, --results-dir RESULTS_DIR
+                        Directory with test result files
+  -f RESULTS_FILE, --results-file RESULTS_FILE
+                        File with test results format.
+```
+
+
+To upload all JUNIT results from a directory produced by TCF, use the following command:
+
+```
+$ python3 report.py --runner tcf -j <junit dir> -V v1.13.0-1386-g183e7445c6.2379 -p <plan number> -s <test suite> -m <milestone>
+```
+
+To upload one single JUNIT file produced by sanitycheck, use the following command:
+
+```
+$ python3 report.py --runner sanitycheck -f <junit file> -V v1.13.0-1386-g183e7445c6.2379 -p <plan number> -s <test suite> -m <milestone>
 ```
