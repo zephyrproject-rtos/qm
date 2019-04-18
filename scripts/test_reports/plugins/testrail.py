@@ -151,6 +151,39 @@ class TestRail(object):
     def get_all_sections_by_suite_id(self, proj_id, suite_id):
         return self.client.section.for_suite(proj_id, suite_id)
 
+    def get_all_sections_by_project_id(self, proj_id):
+        suites = self.get_all_suites_by_project_id(proj_id)
+        results = {}
+        for su in suites:
+            mydict = {unicode(k).encode("utf-8"): unicode(v).encode("utf-8") for k,v in su.iteritems()}
+            sections = self.get_all_sections_by_suite_id(proj_id, mydict['id'])
+            for mysection in sections:
+                ms = self.toutf8(mysection)
+                results[ms['id']] = {'name' : ms['name'] , 'parent_id' : ms['parent_id']}
+        return results
+
+
+    def get_section_id_by_name(self, project_id, section_names):
+        sections_list = self.get_all_sections_by_project_id(project_id)
+        names = section_names.split('.')
+        names.reverse()
+        for k, v in sections_list.iteritems():
+            data = v
+            for section in names:
+                if data['name'].upper() == section.upper():
+                    if data['parent_id'] != "None":
+                        data = sections_list[data['parent_id']]
+                    else:
+                        next
+                else:
+                    data = None
+                    break
+
+            if data != None:
+                return k
+
+        return None
+
 
     def get_test_plan_by_name(self, proj_id, plan_name):
         '''

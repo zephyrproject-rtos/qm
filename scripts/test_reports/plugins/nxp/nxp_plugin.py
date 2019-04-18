@@ -8,6 +8,7 @@ import HTMLParser
 import coloredlogs
 import urllib
 import pprint
+import yaml
 from nxp_argparser import parse_args
 from testrail_client import TestRailClient
 from plugins.testrail import TestRail
@@ -57,6 +58,7 @@ class NXP(TestRail):
 		self.pname = iargparser.pname
 		self.batch = iargparser.batch
 		self.query = iargparser.query
+		self.project = iargparser.project
 		logging.info('init NXP plugin')
 
 	def process(self, args):
@@ -117,7 +119,7 @@ class NXP(TestRail):
 				ret["board_name"], ret["suite_name"], ret["case_name"], ret["result_id"], ret["log_file_path"])
 			return True
 
-		self.query()
+		self.query_func()
 
 		return True
 
@@ -152,14 +154,58 @@ class NXP(TestRail):
 					print("test suite id: " + mydict['id'])
 					print("test suite name: " + mydict['name'])
 			return True
-		else:
+		elif self.query.upper() == "SECTIONS":
 			projs = self.list_projects()
 			for proj in projs:
 				logging.info(proj)
+				sections = self.get_all_sections_by_project_id(proj['id'])
+				#print(sections)
+				for k,v in sections.iteritems():
+					need_tab = False
+					if v['parent_id'] and v['parent_id'] != "None":
+						print("section parent name is " +  sections[v['parent_id']]['name'])
+						need_tab = True
+					if need_tab:
+						print("\tsection id is " + k)
+						print("\tsection name is " + v['name'])
+					else:
+						print("section id is " + k)
+						print("section name is " + v['name'])
+			return True
+		elif self.query.upper() == "CASES":
+			projs = self.list_projects()
+			data = {}
+			for proj in projs:
+				if self.project != proj['name']:
+					next
+				logging.info(proj)
+				suites = self.get_all_suites_by_project_id(proj['id'])
+				for suite in suites :
+					cases = self.get_all_cases_by_project_id(proj['id'], suite['id'])
+					for case in cases:
+						logging.info("=========================================")
+						logging.info("case id " + str(case['id']) + " title " + case['title'])
+						data[case['title']] = str(case['id'])
+			with open('data.yml', 'w') as outfile:
+				yaml.safe_dump(data, outfile, default_flow_style=False)
+			return True		
+		else:
+			projs = self.list_projects()
+			for proj in projs:
+				logging.info("=========================================")
+				logging.info(proj)
+				
 				case_id = self.get_case_id_by_ref(self.query, proj['id'])
 				if case_id:
 					print("case %s id is %s"%(self.query, case_id))
 					return True
+				'''
+				section_id = self.get_section_id_by_name(proj['id'], self.query)
+				if section_id:
+					print("section %s id is %s"%(self.query, section_id))
+					return True					
+				'''
+				'''
 				boards = self.get_config_all_items_by_name(proj['id'],"Boards")
 				if boards:
 					for board in boards:
@@ -167,6 +213,8 @@ class NXP(TestRail):
 						if br['name'] == self.query:
 							print("board id is ", br['id'])
 							return True
+				'''
+			print("sorry we do not find any match")
 		return False
 
 	def parse_batch_string(self, batch_string):
@@ -401,7 +449,7 @@ class NXP(TestRail):
 	 		logging.info(incase['refs'])
 	 		mstdout.insert(-1, str(incase['refs']))
 	 		logging.info(incase['id'])
-	 		mstdout.insert(-1, str(incase['id']))	
+	 		mstdout.insert(-1, str(incase['id']))
 		return test_cases
 	def run_test_query(self):
 		mstdout = ['']

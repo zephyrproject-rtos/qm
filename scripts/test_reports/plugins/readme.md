@@ -71,8 +71,11 @@ python ./report.py -P nxp -q status_ids
 ```
 ### query case ref id
 ```
-python ./report.py -P nxp -q "kernel.device.dummy_device
-
+python ./report.py -P nxp -q "kernel.device.dummy_device"
+```
+### query section id
+```
+python ./report.py -P nxp -q "kernel.device"
 ```
 ### query board id
 ```
