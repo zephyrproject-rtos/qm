@@ -176,16 +176,29 @@ class NXP(TestRail):
 			projs = self.list_projects()
 			data = {}
 			for proj in projs:
-				if self.project != proj['name']:
-					next
-				logging.info(proj)
+
+				if self.project != proj['id']:
+					continue
+
+				logging.info("=========================================")
+				logging.info(proj['id'])
+
 				suites = self.get_all_suites_by_project_id(proj['id'])
+
 				for suite in suites :
-					cases = self.get_all_cases_by_project_id(proj['id'], suite['id'])
-					for case in cases:
-						logging.info("=========================================")
-						logging.info("case id " + str(case['id']) + " title " + case['title'])
-						data[case['title']] = str(case['id'])
+					logging.info("=========================================")
+					logging.info(self.toutf8(suite['name']))
+					sections = self.get_all_sections_by_suite_id(proj['id'], suite['id'])
+					
+					for section in sections:
+						logging.info(section['name'])
+						cases = self.get_all_cases_by_project_id(proj['id'], suite['id'], section['id'])
+						for case in cases:
+							logging.info("=========================================")
+							#logging.info(case)
+							logging.info("section name " + section['name'] + " title " + case['title'])
+							data[case['title']] = section['name']
+
 			with open('data.yml', 'w') as outfile:
 				yaml.safe_dump(data, outfile, default_flow_style=False)
 			return True		

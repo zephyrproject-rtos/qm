@@ -69,6 +69,11 @@ python ./report.py -P nxp -q suites
 python ./report.py -P nxp -q status_ids
 
 ```
+### query cases
+```
+python ./report.py -P nxp -p 5 -q cases
+
+```
 ### query case ref id
 ```
 python ./report.py -P nxp -q "kernel.device.dummy_device"
