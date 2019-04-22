@@ -143,7 +143,7 @@ class TestRail(object):
         return None        
 
     def get_all_cases_by_project_id(self, proj_id, suite_id, section_id='', **filters):
-        return self.client.case.for_project(proj_id, suite_id, section_id='', **filters)
+        return self.client.case.for_project(proj_id, suite_id, section_id, **filters)
 
     def get_all_suites_by_project_id(self, proj_id):
         return self.client.suite.for_project(proj_id)

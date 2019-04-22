@@ -189,15 +189,16 @@ class NXP(TestRail):
 					logging.info("=========================================")
 					logging.info(self.toutf8(suite['name']))
 					sections = self.get_all_sections_by_suite_id(proj['id'], suite['id'])
-					
+
 					for section in sections:
 						logging.info(section['name'])
-						cases = self.get_all_cases_by_project_id(proj['id'], suite['id'], section['id'])
+						cases = self.get_all_cases_by_project_id(proj['id'], suite['id'])
 						for case in cases:
 							logging.info("=========================================")
 							#logging.info(case)
 							logging.info("section name " + section['name'] + " title " + case['title'])
-							data[case['title']] = section['name']
+							if section['id'] == case['section_id'] and suite['id'] == case['suite_id']:
+								data[case['title']] = section['name']
 
 			with open('data.yml', 'w') as outfile:
 				yaml.safe_dump(data, outfile, default_flow_style=False)
