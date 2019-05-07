@@ -198,7 +198,7 @@ class NXP(TestRail):
 							#logging.info(case)
 							logging.info("section name " + section['name'] + " title " + case['title'])
 							if section['id'] == case['section_id'] and suite['id'] == case['suite_id']:
-								data[case['title']] = section['name']
+								data[case['title']] = case['refs']
 
 			with open('data.yml', 'w') as outfile:
 				yaml.safe_dump(data, outfile, default_flow_style=False)
