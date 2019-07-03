@@ -724,7 +724,6 @@ where sanitycheck expect 1 file per configuration.
     parser.add_argument('-p', '--project', type=int, help="Project ID")
     parser.add_argument('-s', '--suite', type=int, help="Suite ID")
 
-    parser.add_argument('-n', '--dry-run', action="store_true", help="Dry run")
     parser.add_argument("-m", "--milestone", type=int, help="Milestone ID")
     parser.add_argument('-P', '--plan', type=int, help="Test plan ID")
 
