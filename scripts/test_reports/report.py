@@ -23,6 +23,12 @@ retest_text = "description: subtestcase didn't run: likely the image failed to b
 
 DEBUG = False
 
+err_messages = []
+upl_messages = []
+files_counter = 0
+files_error = 0
+sections = []
+
 def debug(msg):
     if DEBUG:
         print(msg)
@@ -70,7 +76,6 @@ class Configurations(TestRail):
             print("Creating new group")
             ret = self.client.config.add_group(project_id=self.project, name=group)
             self.group_id = ret.get("id")
-
     def add(self, config):
         self.client.config.add(self.group_id, config)
 
@@ -126,6 +131,7 @@ class Status(TestRail):
             elif sname == "retest":
                 self.RETEST = sid
 
+
 class TestRun(TestRail):
 
     def __init__(self):
@@ -162,7 +168,6 @@ class TestRun(TestRail):
         for case in self.cases:
             if case['refs'] == reference:
                 return case['id']
-
         return 0
 
     def get_case_name(self, name):
@@ -173,209 +178,247 @@ class TestRun(TestRail):
 
 
     def parse_files(self):
-
         for result_file in self.result_files:
             self.parse_file(result_file)
 
+    def find_case_by_ref(suite, ref):
+        for c in suite:
+            if c['refs'] == ref:
+                return c['id']
+        return None
+
     def parse_file(self, result_file):
 
+        passed_counter = 0
+        skipped_counter = 0
+        failure_counter = 0
         config = result_file.get('config')
 
-        print("Parsing {}".format(result_file['file']))
+        try:
+            junit_xml = JUnitXml.fromfile(result_file['file'])
+            print("\nParsing file success {}".format(result_file['file']))
 
+            results_to_upload = []
+            parents = {}
 
-        junit_xml = JUnitXml.fromfile(result_file['file'])
+            for suite in junit_xml:
+                for testcase in suite:
+                    if testcase.result and testcase.result.type == 'skipped':
+                        continue
 
-        results_to_upload = []
-        parents = {}
+                    ref = self.get_case_name(testcase.name)
 
-        for suite in junit_xml:
-            for testcase in suite:
-                if testcase.result and testcase.result.type == 'skipped':
-                    continue
-
-                ref = self.get_case_name(testcase.name)
-                # if test is skipped, keep it as such, otherwise look at parent results
-                if  testcase.result:
-                    tc = testcase
-                elif testcase.name in parents:
-                    tc = parents[testcase.name]
-                else:
-                    parent = self.find_parent_in_junit(junit_xml, testcase.name)
-                    if parent:
-                        debug("--> found parent failure: %s -> %s" %(parent.name, parent.result) )
-
-                        runid_err = "eval error: expected console output 'RunID"
-                        runid_result = "console output: RunID"
-
-                        if parent.result._elem.text and runid_err in parent.result._elem.text and runid_result in parent.result._elem.text:
-
-                            debug("{} parent is FALSE NEGATIVE, so keep sub-test result".format(testcase.name))
-                            tc = testcase
-                        else:
-                            tc = parent
-
-                        parents[testcase.name] = parent
-                    else:
+                    if  testcase.result:
                         tc = testcase
-
-                cr = {}
-                cr['ref'] = ref
-
-                filtered = ""
-                infra_issue = False
-                if tc.result:
-                    override = None
-
-                    text = tc.result._elem.text
-                    if text:
-                        filtered = self.get_case_text(text)
-
-                    if override:
-                        test_status = override
+                    elif testcase.name in parents:
+                        tc = parents[testcase.name]
                     else:
-                        if tc.result.type == 'error' and tc.result.message == 'Infrastructure':
-                            test_status = self.status.RETEST
-                            infra_issue = True
-                        elif tc.result.type == 'error':
-                            test_status = self.status.BLOCKED
-                        elif tc.result.type == 'skipped':
-                            test_status = self.status.SKIPPED
-                        elif tc.result.type == 'failure':
-                            test_status = self.status.FAILED
+                        parent = self.find_parent_in_junit(junit_xml, testcase.name)
+                        if parent:
+                            debug("--> found parent failure: %s -> %s" %(parent.name, parent.result) )
+
+                            runid_err = "eval error: expected console output 'RunID"
+                            runid_result = "console output: RunID"
+
+                            if parent.result._elem.text and runid_err in parent.result._elem.text and runid_result in parent.result._elem.text:
+
+                                debug("{} parent is FALSE NEGATIVE, so keep sub-test result".format(testcase.name))
+                                tc = testcase
+                            else:
+                                tc = parent
+
+                            parents[testcase.name] = parent
                         else:
-                            test_status = self.status.RETEST
+                            tc = testcase
 
-                        status_text = tc.result.type
+                    cr = {}
+                    cr['ref'] = ref
 
-                    cr['status_id'] = test_status
+                    filtered = ""
+                    infra_issue = False
+                    if tc.result:
+                        override = None
+
+                        text = tc.result._elem.text
+                        if text:
+                            filtered = self.get_case_text(text)
+
+                        if override:
+                            test_status = override
+                        else:
+                            if tc.result.type == 'error' and tc.result.message == 'Infrastructure':
+                                test_status = self.status.RETEST
+                                infra_issue = True
+                            elif tc.result.type == 'error':
+                                test_status = self.status.BLOCKED
+                            elif tc.result.type == 'skipped':
+                                test_status = self.status.SKIPPED
+                                skipped_counter += 1
+                            elif tc.result.type == 'failure':
+                                test_status = self.status.FAILED
+                                failure_counter += 1
+                            else:
+                                test_status = self.status.RETEST
+
+                            status_text = tc.result.type
+
+                        cr['status_id'] = test_status
+                    else:
+                        cr['status_id'] = self.status.PASSED
+                        status_text = 'passed'
+                        passed_counter += 1
+
+                    debug("{}: {} => {}".format(config, testcase.name, status_text))
+                    if filtered == "" and infra_issue:
+                        cr['comment'] = "Infrastructure issue, please retest."
+                    else:
+                        cr['comment'] = filtered
+
+                    cr['version'] = self.version
+                    results_to_upload.append(cr)
+
+                print("Passed counter: ", passed_counter)
+                print("Skipped counter: ", skipped_counter)
+                print("Failure+Error counter: ", failure_counter)
+
+            #uncomment line below, to see results to upload
+            #pprint(results_to_upload)
+
+            tmp_res = []
+            tids = []
+            missed_testcases = []
+            missed_cases_counter = 0
+
+            for result in results_to_upload:
+                ref = result['ref']
+                case_id = self.get_case_id(ref)
+                if case_id:
+                    tids.append(case_id)
+                    result['case_id'] = case_id
+                    del result['ref']
+                    tmp_res.append(result)
                 else:
-                    cr['status_id'] = self.status.PASSED
-                    status_text = 'passed'
+                    missed_testcases.append(ref)
+                    missed_cases_counter += 1
 
-                debug("{}: {} => {}".format(config, testcase.name, status_text))
-                if filtered == "" and infra_issue:
-                    cr['comment'] = "Infrastructure issue, please retest."
-                else:
-                    cr['comment'] = filtered
+            if(missed_testcases):
+                print("\n{} test case(s) below not found in the TestRail suite. Add missed case(s) to TestRail and run script again:".format(missed_cases_counter))
+                for i in range(len(missed_testcases)):
+                    print(missed_testcases[i])
+                err_file_name = result_file['file']
+                err_file_name = err_file_name.split("/")[1]
+                err_msg ="WARNING1: TestRail doesn't contain {} test case(s) from a file {} . New case(s) must be added to TestRail manually and then run script again.".format(missed_cases_counter, err_file_name)
+                err_messages.append(err_msg)
 
-                cr['version'] = self.version
-                results_to_upload.append(cr)
-
-
-        pprint(results_to_upload)
-
-        tmp_res = []
-        tids =[]
-
-        for result in results_to_upload:
-            print(result)
-            ref = result['ref']
-            case_id = self.get_case_id(ref)
-            print(case_id)
-            if case_id:
-                tids.append(case_id)
-
-                result['case_id'] = case_id
-                del result['ref']
-                tmp_res.append(result)
-
-        entry = {
-            "include_all": False,
-            "case_ids": tids,
-            "config_ids": [result_file['id']],
-        }
-        self.final_results.append({'config': config, 'results': tmp_res, 'run_entry': entry, 'config_id': result_file['id']})
+            entry = {
+                "include_all": False,
+                "case_ids": tids,
+                "config_ids": [result_file['id']],
+            }
+            self.final_results.append({'config': config, 'results': tmp_res, 'run_entry': entry, 'config_id': result_file['id']})
+        except:
+            err_file_name = result_file['file']
+            err_file_name = err_file_name.split("/")[1]
+            err_msg = "ERROR1: Can't parse file {}".format(err_file_name)
+            err_messages.append(err_msg)
+            global files_error
+            files_error += 1
 
 
     def process(self):
         self.parse_files()
-
+        print('\n')
         for fr in self.final_results:
-            print("Creating plan configuration")
+            print("Creating plan configuration for {}".format(fr.get('config')))
             self.config_ids.append(fr['config_id'])
             self.runs.append(fr['run_entry'])
+        print("\n")
 
         self.plan_entries = self.client.plan.add_entry(self.plan['id'], self.suite, '{} Test Run {}'.format(self.title, self.version) ,
                                                          config_ids=self.config_ids, runs=self.runs)
 
     def upload(self):
         plan = self.client.plan.get(self.plan['id'])
+        global files_error
+        global files_counter
 
         runs = []
         for entry in plan['entries']:
             runs = entry['runs']
 
         for rr in self.final_results:
+            match_platform = True
+
             for r in runs:
                 if r['config'] == rr.get('config'):
-                    print("Submitting results for {}".format(rr.get('config')))
-                    self.client.result.add_for_cases(r['id'], rr.get('results') )
+                    try:
+                        match_platform = False
+                        self.client.result.add_for_cases(r['id'], rr.get('results'))
+                        upl_msg = "Submitted results for " + format(r['config']) + " with RunID:" + format(r['id']) + " on PlanID:" + format(self.plan['id'])
+                        upl_messages.append(upl_msg)
+                        files_counter += 1
+                    except:
+                        err_msg ="ERROR2: Can't submit results for " + format(rr.get('config')) +" on PlanID:"+ format(self.plan['id'])
+                        err_messages.append(err_msg)
+                        files_error += 1
+            if match_platform:
+                err_msg = "ERROR4: In the TestRail can't find the platfrom: " + format(rr.get('config'))+" for PlanID:"+format(self.plan['id'])
+                err_messages.append(err_msg)
+                files_error += 1
 
-class TCF(TestRun):
 
-    def __init__(self, result_directory, project_id, version, suite, milestone):
+class SanityCheckBatch(TestRun):
+
+    def __init__(self, result_directory, project_id, version, suite, milestone, plan):
         super().__init__()
         super().authorize()
 
-        self.project_id = project_id
+        global version_split
+        version_split = 0
+        version_split = version.split("-")[4]
+        if plan:
+            self.plan = self.client.plan.get(plan)
+
+            pprint(self.plan)
+            self.project_id = self.plan.get('project_id', None)
+        else:
+            self.project_id = project_id
         self.version = version
         self.suite = suite
         self.milestone = milestone
-
-        self.variants = ['zephyr', 'espressif']
-
         self.results_directory = result_directory
-        self.title = "TCF"
+        self.title = "Zephyr Daily Test"
 
     def get_case_name(self, name):
-        return name.split("#")[1]
+        return name
 
     def find_parent_in_junit(self, junit_xml, name):
-
-        testp, ref = name.split("#")
-
-        for suite in junit_xml:
-            for testcase in suite:
-                p = self.get_case_name(testcase.name)
-                ref_parent = ".".join(ref.split(".")[:-1])
-                name = "{}#{}".format(testp, ref_parent)
-
-                if testcase.name == name and testcase.result and testcase.result.type == 'error' and testcase.result.type != 'skipped':
-                    return testcase
-
         return None
 
     def get_case_text(self, text):
-        filtered = []
-        for l in text.split("\n"):
-            if "console output:" in l:
-                new = re.sub(".* console output:", "", l)
-                trimmed = re.sub("/home/jenkins.*zephyr.git", "zephyr.git", new)
-                filtered.append(trimmed)
-
-        result = "\n".join(filtered)
-
-        return result
+        return text
 
     def discover(self):
-
-        for variant in self.variants:
-            for j in glob.glob("{}/*{}__zephyr*.xml".format(self.results_directory, variant)):
-
+        for j in glob.glob("{}/*__zephyr*.xml".format(self.results_directory)):
                 file = os.path.basename((j))
                 file_meta = file.split("__")
-
-                platform = file_meta[0].replace("junit-", "")
-
-                if platform != 'static':
+                file_branch = file.split("_")[-1]
+                file_branch = file_branch.split(".")
+                if file_branch[0]==version_split:
+                    platform = file_meta[0].replace("junit-", "")
                     self.result_files.append({"file": j, "config": platform})
+                    print("File", file , "submitted")
+                else:
+                    err_msg = "ERROR3: File "+file+" can't be submitted. Version is not current master version"
+                    err_messages.append(err_msg)
+                    global files_error
+                    files_error += 1
 
         # Get platforms from project
         p = Configurations(project_id=self.project_id)
         p.get("Platforms")
 
-        # See if we need to create new configurations on project
+        # See if we need to create new configurations for platforms on project
         for rf in self.result_files:
             config = rf['config']
             if p.provides(config=config) == 0:
@@ -386,6 +429,30 @@ class TCF(TestRun):
         p.get("Platforms")
         for rf in self.result_files:
             rf['id'] = p.provides(rf.get('config'))
+
+    def sanitycheck_log(self):
+
+        if len(upl_messages) != 0:
+            print('\n====================Results====================')
+            for j in range(len(upl_messages)):
+                print(upl_messages[j])
+        else:
+            print("No uploaded platforms")
+
+        print('\n====================Total summary====================')
+        if (files_counter != 0):
+            print(files_counter, "file(s) uploaded")
+        if (files_error != 0):
+            print(files_error, "file(s) not uploaded")
+
+        print('\n====================Error messages====================')
+        if len(err_messages) != 0:
+                for i in range(len(err_messages)):
+                        print(err_messages[i])
+        else:
+            print("No errors")
+
+        print('\n====================End====================')
 
 
 class SanityCheck(TestRun):
@@ -402,7 +469,6 @@ class SanityCheck(TestRun):
         else:
             self.project_id = project_id
 
-
         self.config = config
         self.version = version
         self.suite = suite
@@ -418,8 +484,6 @@ class SanityCheck(TestRun):
 
     def get_case_text(self, text):
         return text
-
-
 
     def discover(self):
 
@@ -441,6 +505,29 @@ class SanityCheck(TestRun):
         for rf in self.result_files:
             rf['id'] = p.provides(rf.get('config'))
 
+    def sanitycheck_log(self):
+
+        if len(upl_messages) != 0:
+            print('\n====================Results====================')
+            for j in range(len(upl_messages)):
+                print(upl_messages[j])
+        else:
+            print("No uploaded platform")
+
+        print('\n====================Total summary====================')
+        if (files_counter != 0):
+            print(files_counter, "file uploaded")
+        if (files_error != 0):
+            print(files_error, "file not uploaded")
+
+        print('\n====================Error messages====================')
+        if len(err_messages) != 0:
+                for i in range(len(err_messages)):
+                        print(err_messages[i])
+        else:
+            print("No errors")
+
+        print('\n====================End====================')
 
 
 class MaxwellPro(TestRun):
@@ -526,7 +613,7 @@ class MaxwellPro(TestRun):
                 del result['ref']
                 tmp_res.append(result)
             else:
-                print("Cant find case for {}".format(ref))
+                print("Can't find case for {}".format(ref))
 
         entry = {
             "include_all": False,
@@ -692,7 +779,7 @@ def parse_args():
                 description="Upload test results testrail")
 
 
-    parser.add_argument("--runner", default='sanitycheck', choices=['tcf', 'sanitycheck', 'maxwell', 'autopts'],
+    parser.add_argument("--runner", default='sanitycheck', choices=['sanitycheckbatch', 'sanitycheck', 'maxwell', 'autopts'],
                         help="""
 Select runner to import from.
 """)
@@ -703,10 +790,9 @@ Select runner to import from.
 You can either select a directory with multiple files or just point to
 one file depending on the source of the results.
 
-TCF results expect a directory with multiple files,
-where sanitycheck expect 1 file per configuration.
+SanitycheckBatch expects a directory with multiple files.
+Sanitycheck expects 1 file per configuration.
                                         """)
-
 
     xor_results = result_file_select.add_mutually_exclusive_group()
     xor_results.add_argument('-j', '--results-dir', default=None,
@@ -729,9 +815,11 @@ where sanitycheck expect 1 file per configuration.
 
     return parser.parse_args()
 
+
+
+
 def main():
     args = parse_args()
-
 
     if args.runner == 'maxwell':
         tr = MaxwellPro(results_file=args.results_file,
@@ -749,9 +837,8 @@ def main():
                          version=args.commit,
                          milestone=args.milestone,
                          plan=args.plan)
-    elif args.runner == 'tcf':
-        tr = TCF(results_dir=args.results_dir,
-                         config=args.config,
+    elif args.runner == 'sanitycheckbatch':
+        tr = SanityCheckBatch(result_directory=args.results_dir,
                          project_id=args.project,
                          suite=args.suite,
                          version=args.commit,
@@ -773,6 +860,8 @@ def main():
     tr.process()
     tr.upload()
 
+    if args.runner == 'sanitycheck' or args.runner == 'sanitycheckbatch':
+        tr.sanitycheck_log()
 
 if __name__ == '__main__':
     main()
