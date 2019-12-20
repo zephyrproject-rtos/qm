@@ -18,6 +18,7 @@ from junitparser import TestCase, TestSuite, JUnitXml, Skipped, Error
 import re
 import datetime
 import argparse
+import configparser
 
 retest_text = "description: subtestcase didn't run: likely the image failed to build or to deploy"
 
@@ -153,6 +154,7 @@ class TestRun(TestRail):
         self.final_results = []
         self.plan_entries = None
         self.title = "Test Run"
+        self.configbuginfo = None
 
     def configure(self):
         self.status = Status(self.project_id)
@@ -175,6 +177,22 @@ class TestRun(TestRail):
 
     def get_case_text(self, text):
         return text
+
+
+    def parse_buginfofile(self, buginfos_file):
+        try:
+            if os.path.isfile(buginfos_file):
+                self.configbuginfo = configparser.ConfigParser()
+                self.configbuginfo.read(buginfos_file)
+
+            else:
+                err_msg = "ERROR5: The file is not exist for bug information: {}".format(buginfos_file)
+                err_messages.append(err_msg)
+
+        except:
+            self.configbuginfo = None
+            err_msg = "ERROR5: Can't parse bug info file {}".format(buginfos_file)
+            err_messages.append(err_msg)
 
 
     def parse_files(self):
@@ -215,7 +233,7 @@ class TestRun(TestRail):
                     else:
                         parent = self.find_parent_in_junit(junit_xml, testcase.name)
                         if parent:
-                            debug("--> found parent failure: %s -> %s" %(parent.name, parent.result) )
+                            debug("--> found parent failure: %s -> %s" %(parent.name, parent.result))
 
                             runid_err = "eval error: expected console output 'RunID"
                             runid_result = "console output: RunID"
@@ -251,12 +269,16 @@ class TestRun(TestRail):
                                 infra_issue = True
                             elif tc.result.type == 'error':
                                 test_status = self.status.BLOCKED
+                                if self.configbuginfo and self.configbuginfo.has_section(config) and self.configbuginfo.has_option(config, ref):
+                                    cr['defects'] = self.configbuginfo.get(config, ref)
                             elif tc.result.type == 'skipped':
                                 test_status = self.status.SKIPPED
                                 skipped_counter += 1
                             elif tc.result.type == 'failure':
                                 test_status = self.status.FAILED
                                 failure_counter += 1
+                                if self.configbuginfo and self.configbuginfo.has_section(config) and self.configbuginfo.has_option(config, ref):
+                                    cr['defects'] = self.configbuginfo.get(config, ref)
                             else:
                                 test_status = self.status.RETEST
 
@@ -326,6 +348,8 @@ class TestRun(TestRail):
 
 
     def process(self):
+        if self.buginfos_file:
+            self.parse_buginfofile(self.buginfos_file)
         self.parse_files()
         print('\n')
         for fr in self.final_results:
@@ -369,7 +393,7 @@ class TestRun(TestRail):
 
 class SanityCheckBatch(TestRun):
 
-    def __init__(self, result_directory, project_id, version, suite, milestone, plan):
+    def __init__(self, result_directory, project_id, version, suite, milestone, plan, buginfo_file=None):
         super().__init__()
         super().authorize()
 
@@ -387,6 +411,7 @@ class SanityCheckBatch(TestRun):
         self.suite = suite
         self.milestone = milestone
         self.results_directory = result_directory
+        self.buginfos_file = buginfo_file
         self.title = "Zephyr Daily Test"
 
     def get_case_name(self, name):
@@ -457,7 +482,7 @@ class SanityCheckBatch(TestRun):
 
 class SanityCheck(TestRun):
 
-    def __init__(self, results_file, config, project_id, version, suite, milestone, plan):
+    def __init__(self, results_file, config, project_id, version, suite, milestone, plan, buginfo_file=None):
         super().__init__()
         super().authorize()
 
@@ -474,6 +499,7 @@ class SanityCheck(TestRun):
         self.suite = suite
         self.results_file = results_file
         self.milestone = milestone
+        self.buginfos_file = buginfo_file
         self.title = "Sanitycheck"
 
     def get_case_name(self, name):
@@ -801,6 +827,9 @@ Sanitycheck expects 1 file per configuration.
     xor_results.add_argument('-f', '--results-file', default=None,
             help="File with test results format.")
 
+    parser.add_argument('-b', '--buginfo-file', default=None,
+            help="File with bug info format.")
+
     parser.add_argument('-c', '--config', default=None,
             help="Configuration name.")
 
@@ -836,14 +865,16 @@ def main():
                          suite=args.suite,
                          version=args.commit,
                          milestone=args.milestone,
-                         plan=args.plan)
+                         plan=args.plan,
+                         buginfo_file=args.buginfo_file)
     elif args.runner == 'sanitycheckbatch':
         tr = SanityCheckBatch(result_directory=args.results_dir,
                          project_id=args.project,
                          suite=args.suite,
                          version=args.commit,
                          milestone=args.milestone,
-                         plan=args.plan)
+                         plan=args.plan,
+                         buginfo_file=args.buginfo_file)
     elif args.runner == 'autopts':
         tr = AutoPTS(results_file=args.results_file,
                          config=args.config,
