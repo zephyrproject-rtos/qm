@@ -76,6 +76,17 @@ optional arguments:
                         Milestone ID
   -P PLAN, --plan PLAN  Test plan ID
 
+  -b buginfo_file, --buginfo-file buginfo_file for sanitycheck & sanitycheckbatch runner
+                     points to a file containing bug info for the error/failure cases.
+                     When test cases results will be uploaded into the Test Rail, the bug IDs will be auto added for the error/failure cases.
+                     The file format is following:
+
+                     [platform1 name]
+                      Case1 name= bug ID
+                      Case2 name= bug ID
+                     [platform2 name]
+                      Case1 name= bug ID
+
 Result files (input):
   You can either select a directory with multiple files or just point to one
   file depending on the source of the results. TCF results expect a
@@ -96,10 +107,10 @@ $ python3 report.py --runner sanitycheckbatch -j <junit dir> -V <commit_id>    -
 ```
 
 Python script for Sanitycheck and for SanitycheckBatch has useful log information, for better view of it you can follow next step.
-For example, if you want to upload all Junit results from a directory and see log output, you can use next command. Create empty file log.txt before run that command.
+For example, if you want to upload all Junit results from a directory, and upload bug information from a file, then see log output, you can use next command. Create empty file log.txt before run that command.
 
 ```
-$ python3 report.py --runner sanitycheckbatch -j junit4TestRail -V master-2019-10-16-3d4aef8f99    -p 5 -s 52 -m 9 >> log.txt
+$ python3 report.py --runner sanitycheckbatch -j junit4TestRail -V master-2019-10-16-3d4aef8f99    -p 5 -s 52 -m 9 -b buginfo.ini>> log.txt
 ```
 
 To upload one single Junit file produced by Sanitycheck, use the following command:
